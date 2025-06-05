@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitHub Repo Explorer</title>
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/25/25231.png" type="image/png" />
+
+  <style>
+    :root {
+      --bg: #0e0e0e;
+      --text: #eee;
+      --accent: #00f7ff;
+      --card: #1f1f1f;
+    }
+    body.light {
+      --bg: #f5f5f5;
+      --text: #111;
+      --accent: #0077ff;
+      --card: #ffffff;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    input, select, button {
+      padding: 10px;
+      margin: 10px 5px 10px 0;
+      font-size: 1em;
+      border-radius: 6px;
+      border: none;
+      outline: none;
+    }
+
+    input, select {
+      width: 200px;
+    }
+
+    button {
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background: #03d1e2;
+    }
+
+    .toggle-theme {
+      float: right;
+      margin-top: -45px;
+      background: transparent;
+      border: 2px solid var(--accent);
+      color: var(--accent);
+    }
+
+    .info, .repo {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 15px;
+      margin: 15px 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      animation: fadeIn 0.4s ease;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    h3 {
+      margin-top: 0;
+    }
+
+    pre {
+      background: rgba(0,0,0,0.2);
+      padding: 10px;
+      overflow: auto;
+      border-radius: 6px;
+      font-size: 0.9em;
+    }
+
+    .controls {
+      margin: 10px 0;
+    }
+
+    .label {
+      font-weight: bold;
+    }
+
+    @keyframes fadeIn {
+      from {opacity: 0; transform: translateY(10px);}
+      to {opacity: 1; transform: translateY(0);}
+    }
+  </style>
+</head>
+<body>
+
+<h2>🔍 GitHub Repo Explorer</h2>
+<button class="toggle-theme" onclick="toggleTheme()">🌗 Theme</button>
+
+<div class="controls">
+  <input id="username" placeholder="GitHub username" />
+  <button onclick="getRepos()">Fetch</button>
+  <input id="filter" placeholder="Search repos..." oninput="filterRepos()" />
+  <select id="sort" onchange="sortRepos()">
+    <option value="">Sort by...</option>
+    <option value="name">Name</option>
+    <option value="size">Size</option>
+    <option value="created">Created</option>
+    <option value="updated">Updated</option>
+  </select>
+</div>
+
+<div id="info"></div>
+<div id="result"></div>
+
+<script>
+  let repoList = [];
+
+  function toggleTheme() {
+    document.body.classList.toggle('light');
+  }
+
+  async function getRepos() {
+    const user = document.getElementById('username').value.trim();
+    const result = document.getElementById('result');
+    const info = document.getElementById('info');
+    result.innerHTML = info.innerHTML = '';
+    repoList = [];
+
+    if (!user) return result.innerHTML = '❗ Please enter a GitHub username.';
+
+    const userUrl = `https://api.github.com/users/${user}`;
+    const reposUrl = `https://api.github.com/users/${user}/repos`;
+
+    try {
+      const [userRes, reposRes] = await Promise.all([fetch(userUrl), fetch(reposUrl)]);
+      const userData = await userRes.json();
+      const repos = await reposRes.json();
+
+      if (!userData.login || !Array.isArray(repos)) return result.innerHTML = '❌ User not found or error.';
+
+      let userHTML = `<div class="info"><h3>👤 ${userData.name || userData.login}</h3>`;
+      if (userData.email) userHTML += `📧 <span class="label">Email:</span> ${userData.email}<br/>`;
+      if (userData.location) userHTML += `📍 <span class="label">Location:</span> ${userData.location}<br/>`;
+      if (userData.bio) userHTML += `🧠 <span class="label">Bio:</span> ${userData.bio}<br/>`;
+      userHTML += `🌐 <a href="${userData.html_url}" target="_blank">GitHub Profile</a><br/>`;
+      userHTML += `📊 <span class="label">Public Repos:</span> ${userData.public_repos}</div>`;
+      info.innerHTML = userHTML;
+
+      for (const repo of repos) {
+        const readmeUrl = `https://raw.githubusercontent.com/${user}/${repo.name}/main/README.md`;
+        const indexUrl = `https://raw.githubusercontent.com/${user}/${repo.name}/main/index.html`;
+
+        let readmeText = '';
+        let indexExists = false;
+
+        try {
+          const res = await fetch(indexUrl, { method: 'HEAD' });
+          indexExists = res.ok;
+        } catch {}
+
+        try {
+          const res = await fetch(readmeUrl);
+          if (res.ok) {
+            readmeText = (await res.text()).slice(0, 300).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '...';
+          }
+        } catch {}
+
+        repoList.push({
+          name: repo.name,
+          size: repo.size,
+          created: repo.created_at,
+          updated: repo.updated_at,
+          desc: repo.description,
+          htmlUrl: repo.html_url,
+          pagesUrl: `https://${user}.github.io/${repo.name}/`,
+          indexUrl: indexExists ? indexUrl : null,
+          readme: readmeText
+        });
+      }
+
+      renderRepos(repoList);
+    } catch (e) {
+      result.innerHTML = '⚠️ Failed to fetch data.';
+    }
+  }
+
+  function renderRepos(list) {
+    const result = document.getElementById('result');
+    result.innerHTML = '';
+    list.forEach(r => {
+      result.innerHTML += `
+        <div class="repo">
+          <h3>📁 ${r.name}</h3>
+          ${r.desc ? `📝 <span class="label">Description:</span> ${r.desc}<br/>` : ''}
+          📦 <span class="label">Size:</span> ${r.size} KB<br/>
+          🕒 <span class="label">Created:</span> ${new Date(r.created).toLocaleString()}<br/>
+          🔄 <span class="label">Updated:</span> ${new Date(r.updated).toLocaleString()}<br/>
+          🔗 <a href="${r.htmlUrl}" target="_blank">GitHub Repo</a><br/>
+          🌐 <a href="${r.pagesUrl}" target="_blank">GitHub Pages</a><br/>
+          ${r.indexUrl ? `📄 <a href="${r.indexUrl}" target="_blank">index.html</a><br/>` : ''}
+          ${r.readme ? `📘 <span class="label">README:</span><pre>${r.readme}</pre>` : ''}
+        </div>
+      `;
+    });
+  }
+
+  function filterRepos() {
+    const q = document.getElementById('filter').value.toLowerCase();
+    const filtered = repoList.filter(r =>
+      r.name.toLowerCase().includes(q) || (r.desc && r.desc.toLowerCase().includes(q))
+    );
+    renderRepos(filtered);
+  }
+
+  function sortRepos() {
+    const type = document.getElementById('sort').value;
+    const sorted = [...repoList];
+
+    if (type === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
+    else if (type === 'size') sorted.sort((a, b) => b.size - a.size);
+    else if (type === 'created') sorted.sort((a, b) => new Date(b.created) - new Date(a.created));
+    else if (type === 'updated') sorted.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+
+    renderRepos(sorted);
+  }
+</script>
+
+</body>
+</html>
